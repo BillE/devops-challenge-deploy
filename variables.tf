@@ -5,7 +5,7 @@ variable "aws_ecr_repo_name" {
   default     = "903874664894.dkr.ecr.us-west-2.amazonaws.com/devops-challenge"
 }
 
-variable "app_image_tag" {
+variable "aws_ecr_image_tag" {
     description = "Tag for container image"
     type        = string
     default     = "latest"
@@ -18,8 +18,9 @@ variable "aws_region" {
 
 }
 
-variable "aws_zone" {
-  description = "Zone in AWS regin where app will be deployed"
-  type = string
-  default = "us-west-2b"
+variable "app_port" {
+    description = "Port our app runs on"
+    type = number
+    default = 3000
+  
 }

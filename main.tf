@@ -11,26 +11,27 @@ terraform {
 
 provider "aws" {
   profile = "default"
-  region  = "us-west-2"
+  region  = var.aws_region
 }
 
+# Create an ECS cluster that our Fargate service will use
 resource "aws_ecs_cluster" "devops_challenge" {
   name = "devops-challenge-cluster" 
 }
 
-
+# Set up the containers
 resource "aws_ecs_task_definition" "devops_challenge_task" {
   family                   = "devops-challenge" 
   container_definitions    = <<DEFINITION
   [
     {
       "name": "devops-challenge",
-      "image": "903874664894.dkr.ecr.us-west-2.amazonaws.com/devops-challenge",
+      "image": "${var.aws_ecr_repo_name}:${var.aws_ecr_image_tag}",
       "essential": true,
       "portMappings": [
         {
-          "containerPort": 3000,
-          "hostPort": 3000
+          "containerPort": ${var.app_port},
+          "hostPort": ${var.app_port}
         }
       ],
       "memory": 512,
@@ -38,18 +39,20 @@ resource "aws_ecs_task_definition" "devops_challenge_task" {
     }
   ]
   DEFINITION
-  requires_compatibilities = ["FARGATE"] # Stating that we are using ECS Fargate
-  network_mode             = "awsvpc"    # Using awsvpc as our network mode as this is required for Fargate
-  memory                   = 512         # Specifying the memory our container requires
-  cpu                      = 256         # Specifying the CPU our container requires
+  requires_compatibilities = ["FARGATE"] 
+  network_mode             = "awsvpc"    # Fargate requires this
+  memory                   = 512         
+  cpu                      = 256         
   execution_role_arn       = aws_iam_role.ecsTaskExecutionRole.arn
 }
 
+# Use the ecsTaskExecutionRole role 
 resource "aws_iam_role" "ecsTaskExecutionRole" {
   name               = "ecsTaskExecutionRole"
   assume_role_policy = data.aws_iam_policy_document.assume_role_policy.json
 }
 
+# Create IAM policy document to be used by IAM Role
 data "aws_iam_policy_document" "assume_role_policy" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -61,11 +64,13 @@ data "aws_iam_policy_document" "assume_role_policy" {
   }
 }
 
+# Attach policy to role
 resource "aws_iam_role_policy_attachment" "ecsTaskExecutionRole_policy" {
   role       = "${aws_iam_role.ecsTaskExecutionRole.name}"
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Set up the Fargate service
 resource "aws_ecs_service" "devops_challenge_service" {
   name            = "devops-challenge-service"                    
   cluster         = aws_ecs_cluster.devops_challenge.id     
@@ -87,6 +92,7 @@ resource "aws_ecs_service" "devops_challenge_service" {
   }
 }
 
+# Define a security group for our service 
 resource "aws_security_group" "service_security_group" {
   ingress {
     from_port = 0
@@ -97,30 +103,31 @@ resource "aws_security_group" "service_security_group" {
   }
 
   egress {
-    from_port   = 0 # Allowing any incoming port
-    to_port     = 0 # Allowing any outgoing port
-    protocol    = "-1" # Allowing any outgoing protocol 
-    cidr_blocks = ["0.0.0.0/0"] # Allowing traffic out to all IP addresses
+    from_port   = 0 
+    to_port     = 0 
+    protocol    = "-1" 
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
-
+# Create three subnets to be load balanced 
 resource "aws_default_vpc" "default_vpc" {
 }
 
 resource "aws_default_subnet" "default_subnet_a" {
-  availability_zone = "us-west-2a"
+  availability_zone = "${var.aws_region}a"
 }
 
 resource "aws_default_subnet" "default_subnet_b" {
-  availability_zone = "us-west-2b"
+  availability_zone = "${var.aws_region}b"
 }
 
 resource "aws_default_subnet" "default_subnet_c" {
-  availability_zone = "us-west-2c"
+  availability_zone = "${var.aws_region}c"
 }
 
-
+# Add read access to our repo
+# TODO: Does ecsTaskExecutionRole already do this?
 resource "aws_ecr_repository_policy" "hub_ecr_repository_policy" {
   repository = "devops-challenge"
   policy = <<EOF
@@ -143,6 +150,7 @@ resource "aws_ecr_repository_policy" "hub_ecr_repository_policy" {
 EOF
 }
 
+# Balance the load across our three subnets
 resource "aws_alb" "application_load_balancer" {
   name               = "test-lb-tf" 
   load_balancer_type = "application"
@@ -155,11 +163,11 @@ resource "aws_alb" "application_load_balancer" {
   security_groups = ["${aws_security_group.load_balancer_security_group.id}"]
 }
 
-# Creating a security group for the load balancer:
+# Create a security group for the load balancer:
 resource "aws_security_group" "load_balancer_security_group" {
   ingress {
-    from_port   = 3000
-    to_port     = 3000
+    from_port   = var.app_port
+    to_port     = var.app_port
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"] 
   }
@@ -172,25 +180,26 @@ resource "aws_security_group" "load_balancer_security_group" {
   }
 }
 
-# Creating target groups
+# Create target groups needed for load balancer
 resource "aws_lb_target_group" "target_group" {
   name        = "target-group"
-  port        = 3000
+  port        = var.app_port
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = "${aws_default_vpc.default_vpc.id}" # Referencing the default VPC
+  vpc_id      = "${aws_default_vpc.default_vpc.id}"
   health_check {
     matcher = "200,301,302"
     path = "/"
   }
 }
 
+# Create a Load Balancer Listener resource.
 resource "aws_lb_listener" "listener" {
-  load_balancer_arn = "${aws_alb.application_load_balancer.arn}" # Referencing our load balancer
-  port              = "3000"
+  load_balancer_arn = "${aws_alb.application_load_balancer.arn}" 
+  port              = var.app_port
   protocol          = "HTTP"
   default_action {
     type             = "forward"
-    target_group_arn = "${aws_lb_target_group.target_group.arn}" # Referencing our tagrte group
+    target_group_arn = "${aws_lb_target_group.target_group.arn}" 
   }
 }
