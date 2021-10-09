@@ -46,7 +46,7 @@ resource "aws_ecs_task_definition" "devops_challenge_task" {
   execution_role_arn       = aws_iam_role.ecsTaskExecutionRole.arn
 }
 
-# Use the ecsTaskExecutionRole role 
+# Use the ecsTaskExecutionRole role for access to repo
 resource "aws_iam_role" "ecsTaskExecutionRole" {
   name               = "ecsTaskExecutionRole"
   assume_role_policy = data.aws_iam_policy_document.assume_role_policy.json
@@ -126,33 +126,9 @@ resource "aws_default_subnet" "default_subnet_c" {
   availability_zone = "${var.aws_region}c"
 }
 
-# Add read access to our repo
-# TODO: Does ecsTaskExecutionRole already do this?
-resource "aws_ecr_repository_policy" "hub_ecr_repository_policy" {
-  repository = "devops-challenge"
-  policy = <<EOF
-{
-    "Version": "2008-10-17",
-    "Statement": [
-        {
-            "Sid": "new policy",
-            "Effect": "Allow",
-            "Principal": "*",
-            "Action": [
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-                "ecr:BatchCheckLayerAvailability", 
-                "ecr:ListImages"
-            ]
-        }
-    ]
-}
-EOF
-}
-
 # Balance the load across our three subnets
 resource "aws_alb" "application_load_balancer" {
-  name               = "test-lb-tf" 
+  name               = "devops-challenge-lb-tf"
   load_balancer_type = "application"
   subnets = [ 
     "${aws_default_subnet.default_subnet_a.id}",
@@ -163,7 +139,7 @@ resource "aws_alb" "application_load_balancer" {
   security_groups = ["${aws_security_group.load_balancer_security_group.id}"]
 }
 
-# Create a security group for the load balancer:
+# Create a security group for the load balancer
 resource "aws_security_group" "load_balancer_security_group" {
   ingress {
     from_port   = var.app_port
