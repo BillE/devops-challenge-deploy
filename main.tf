@@ -110,7 +110,7 @@ resource "aws_security_group" "service_security_group" {
   }
 }
 
-# Create three subnets to be load balanced 
+# Use the default VPC and subnets to make things a bit easier
 resource "aws_default_vpc" "default_vpc" {
 }
 
